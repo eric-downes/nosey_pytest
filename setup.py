@@ -3,18 +3,20 @@
 from setuptools import setup, find_packages
 
 description = (
-    'Pytest Migration Tools - Utilities to help migrate from nose to pytest'
+    'Nosey-pytest - Tools to help migrate from nose to pytest'
 )
 
 setup(
-    name='pytest_migration',
+    name='nosey_pytest',
     author="Eric Downes",
     author_email="eric.downes@gmail.com",
     version='0.1.0',
     description=description,
-    packages=find_packages(),
+    packages=find_packages(include=['src', 'src.*']),
+    py_modules=['migrate', 'pytest_migration'],
     install_requires=[
         'pytest>=7.0.0',
+        'gitpython>=3.1.0',
     ],
     classifiers=[
         'Development Status :: 3 - Alpha',
@@ -25,7 +27,8 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'pytest_migration=pytest_migration:main',
+            'pytest-migration=pytest_migration:main',
+            'nose-to-pytest=migrate:main',
         ],
     },
 )
