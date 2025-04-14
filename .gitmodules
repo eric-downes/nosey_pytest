@@ -1,0 +1,3 @@
+[submodule "nose2pytest"]
+	path = nose2pytest
+	url = https://github.com/pytest-dev/nose2pytest

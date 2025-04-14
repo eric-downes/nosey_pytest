@@ -3,6 +3,9 @@ Migration tracking module for nose to pytest migration.
 
 This module provides functions for tracking the progress of 
 migrating from nose to pytest testing framework.
+
+Copyright (c) 2025 eric-downes
+Licensed under the MIT License (see LICENSE file for details)
 """
 
 import os

@@ -20,7 +20,10 @@ Usage:
   ./pytest_migration.py auto patterns        # Show transformation patterns
   ./pytest_migration.py auto add-pattern     # Add a transformation pattern
 
-Learn more: https://github.com/yourusername/pytest_migration
+Learn more: https://github.com/eric-downes/nosey_pytest
+
+Copyright (c) 2025 eric-downes
+Licensed under the MIT License (see LICENSE file for details)
 """
 
 import os
@@ -128,10 +131,16 @@ def auto_command(args):
         
     from pytest_migration_lib import automigrate
     
+    # Set use_nose2pytest flag
+    use_nose2pytest = not getattr(args, 'no_nose2pytest', False)
+    
     if args.subcommand == 'scan':
         automigrate.scan_command(args.path if hasattr(args, 'path') else None)
     elif args.subcommand == 'migrate':
-        automigrate.migrate_command(args.path if hasattr(args, 'path') else None)
+        if hasattr(args, 'path'):
+            automigrate.migrate_command(args.path, use_nose2pytest=use_nose2pytest)
+        else:
+            automigrate.migrate_command(None, use_nose2pytest=use_nose2pytest)
     elif args.subcommand == 'verify':
         automigrate.verify_command()
     elif args.subcommand == 'config':
@@ -140,6 +149,15 @@ def auto_command(args):
         automigrate.list_patterns_command()
     elif args.subcommand == 'add-pattern':
         automigrate.add_pattern_command()
+    elif args.subcommand == 'install-assert-tools':
+        # Copy assert_tools.py to the current directory
+        import shutil
+        assert_tools_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src', 'assert_tools.py')
+        assert_tools_dest = os.path.join(os.getcwd(), 'pytest_assert_tools.py')
+        shutil.copy2(assert_tools_src, assert_tools_dest)
+        print(f"Installed pytest_assert_tools.py to {assert_tools_dest}")
+        print("To use it, add this to your test modules that need nose.tools assert functions:")
+        print("  from pytest_assert_tools import *")
     else:
         print("Unknown auto command.")
         return 1
@@ -178,6 +196,8 @@ def main():
     
     auto_migrate_parser = auto_subparsers.add_parser("migrate", help="Run automated migration")
     auto_migrate_parser.add_argument("path", nargs="?", help="Path to migrate (file or directory)")
+    auto_migrate_parser.add_argument("--no-nose2pytest", action="store_true", 
+                                     help="Disable using nose2pytest for assertion transformations")
     
     auto_verify_parser = auto_subparsers.add_parser("verify", help="Verify migrated tests")
     
@@ -186,6 +206,11 @@ def main():
     auto_patterns_parser = auto_subparsers.add_parser("patterns", help="List transformation patterns")
     
     auto_add_pattern_parser = auto_subparsers.add_parser("add-pattern", help="Add a new transformation pattern")
+    
+    auto_install_assert_tools_parser = auto_subparsers.add_parser(
+        "install-assert-tools", 
+        help="Install assert_tools.py for the remaining assert functions not converted by nose2pytest"
+    )
     
     args = parser.parse_args()
     

@@ -12,6 +12,7 @@ This toolkit provides comprehensive support for migrating nose tests to pytest, 
 
 - Automatic scanning for nose tests in Python projects
 - Automated migration of nose tests to pytest with transformation patterns
+- Integration with nose2pytest for comprehensive assertion conversions
 - Verification of migrated tests
 - Progress tracking for large migrations
 - Detailed migration reports
@@ -21,8 +22,13 @@ This toolkit provides comprehensive support for migrating nose tests to pytest, 
 
 ```bash
 # Install from source
-git clone https://github.com/yourusername/nosey-pytest.git
-cd nosey-pytest
+git clone https://github.com/eric-downes/nosey_pytest.git
+cd nosey_pytest
+
+# Initialize the nose2pytest submodule
+git submodule update --init --recursive
+
+# Install the package
 pip install -e .
 ```
 
@@ -124,9 +130,10 @@ Configure the migration tool settings:
 pytest-migration auto config
 ```
 
-## Migration Guide
+## Documentation
 
-For detailed guidance on migrating from nose to pytest, see [nose_to_pytest_guide.md](nose_to_pytest_guide.md) in this repository.
+- [Nose to Pytest Migration Guide](nose_to_pytest_guide.md) - Detailed guide for migrating from nose to pytest
+- [Nose2pytest Integration](nose2pytest_integration.md) - How to use the nose2pytest integration in our tools
 
 ## License
 
@@ -134,4 +141,9 @@ MIT
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## Acknowledgments
+
+- [nose2pytest](https://github.com/pytest-dev/nose2pytest) by Oliver Schoenborn, which is integrated into this toolkit
+- All contributors to the pytest ecosystem

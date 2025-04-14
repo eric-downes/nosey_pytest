@@ -5,6 +5,9 @@ This module provides functions for:
 1. Scanning and identifying tests using nose
 2. Applying transformation patterns to migrate to pytest
 3. Verifying migrations work correctly
+
+Copyright (c) 2025 eric-downes
+Licensed under the MIT License (see LICENSE file for details)
 """
 
 import os
@@ -494,8 +497,17 @@ def analyze_file(file_path: str) -> Dict:
     
     return analysis
 
-def migrate_file(file_path: str, dry_run: bool = False) -> Tuple[bool, str]:
-    """Apply transformation rules to convert a nose test to pytest."""
+def migrate_file(file_path: str, dry_run: bool = False, use_nose2pytest: bool = True) -> Tuple[bool, str]:
+    """Apply transformation rules to convert a nose test to pytest.
+    
+    Args:
+        file_path: Path to the file to migrate
+        dry_run: If True, don't actually write changes to the file
+        use_nose2pytest: If True, also apply nose2pytest transformations for assert statements
+        
+    Returns:
+        Tuple of (success, summary)
+    """
     # Read file content
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -507,7 +519,7 @@ def migrate_file(file_path: str, dry_run: bool = False) -> Tuple[bool, str]:
     if not dry_run:
         create_backup(file_path)
     
-    # Apply transformations
+    # Apply our transformations
     modifications = []
     transformed_content = content
     
@@ -554,6 +566,95 @@ def migrate_file(file_path: str, dry_run: bool = False) -> Tuple[bool, str]:
             'description': 'Added pytest import',
             'matches_replaced': 1
         })
+    
+    # Apply nose2pytest transformations if enabled
+    nose2pytest_changes = 0
+    if use_nose2pytest and ('nose.tools.assert_' in transformed_content or 'from nose.tools import' in transformed_content):
+        # Check if nose2pytest is installed/available
+        nose2pytest_script = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
+            'nose2pytest', 'nose2pytest', 'script.py'
+        )
+        
+        if not os.path.exists(nose2pytest_script):
+            modifications.append({
+                'id': 'nose2pytest_missing',
+                'description': f"nose2pytest not found at {nose2pytest_script}. " + 
+                               f"Please ensure the nose2pytest submodule is installed.",
+                'matches_replaced': 0,
+                'error': True
+            })
+        else:
+            try:
+                # Save transformed content to a temporary file
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix='.py', mode='w', delete=False) as temp:
+                    temp_path = temp.name
+                    temp.write(transformed_content)
+                
+                # Check for fissix dependency
+                try:
+                    import fissix
+                except ImportError:
+                    modifications.append({
+                        'id': 'nose2pytest_deps',
+                        'description': f"Missing required dependency: fissix. " + 
+                                      f"Please install with 'pip install fissix'.",
+                        'matches_replaced': 0,
+                        'error': True
+                    })
+                    # Clean up and return early
+                    try:
+                        os.unlink(temp_path)
+                    except:
+                        pass
+                    return success, "\n".join([f"- {mod['description']} ({mod['matches_replaced']} matches)" 
+                                            for mod in modifications if mod['matches_replaced'] > 0])
+                
+                # Run nose2pytest on the temporary file
+                import subprocess
+                import sys
+                result = subprocess.run(
+                    [sys.executable, nose2pytest_script, temp_path],
+                    capture_output=True,
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    # Read the transformed content
+                    with open(temp_path, 'r') as f:
+                        nose2pytest_content = f.read()
+                    
+                    # Check if any changes were made
+                    if nose2pytest_content != transformed_content:
+                        transformed_content = nose2pytest_content
+                        nose2pytest_changes = 1
+                        modifications.append({
+                            'id': 'nose2pytest_assert',
+                            'description': 'Applied nose2pytest transformations for assert statements',
+                            'matches_replaced': 1
+                        })
+                else:
+                    modifications.append({
+                        'id': 'nose2pytest_assert',
+                        'description': f"Error applying nose2pytest: {result.stderr}",
+                        'matches_replaced': 0,
+                        'error': True
+                    })
+                
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+                    
+            except Exception as e:
+                modifications.append({
+                    'id': 'nose2pytest_assert',
+                    'description': f"Error applying nose2pytest: {str(e)}",
+                    'matches_replaced': 0,
+                    'error': True
+                })
     
     # Write transformed content if not dry run
     if not dry_run and transformed_content != content:
@@ -636,7 +737,7 @@ def scan_command(directory: Optional[str] = None):
             for transform in analysis['applicable_transformations']:
                 print(f"   - {transform['description']} ({transform['match_count']} matches)")
 
-def migrate_command(path: Optional[str] = None):
+def migrate_command(path: Optional[str] = None, use_nose2pytest: bool = True):
     """Run automated migration on nose test files."""
     # If a path is specified, handle it
     if path:
@@ -668,6 +769,8 @@ def migrate_command(path: Optional[str] = None):
         return
     
     print(f"Migrating {len(nose_files)} files from nose to pytest...")
+    if use_nose2pytest:
+        print("Using nose2pytest for assertion transformations")
     
     successful_migrations = []
     failed_migrations = []
@@ -677,7 +780,7 @@ def migrate_command(path: Optional[str] = None):
         print(f"\nMigrating {rel_path}...")
         
         # Apply transformations
-        success, summary = migrate_file(file_path)
+        success, summary = migrate_file(file_path, use_nose2pytest=use_nose2pytest)
         
         if not success:
             print("  No transformations applied.")
@@ -718,6 +821,14 @@ def migrate_command(path: Optional[str] = None):
         print("\nFailed migrations:")
         for path, reason in failed_migrations:
             print(f"  ❌ {path} - {reason}")
+            
+    # If successful and using nose2pytest, suggest installing assert_tools
+    if successful_migrations and use_nose2pytest:
+        print("\nNote: For nose.tools assertion functions that cannot be converted to raw assertions,")
+        print("you can install the compatibility module with:")
+        print("  pytest-migration auto install-assert-tools")
+        print("Then in your test files that still need these functions, add:")
+        print("  from pytest_assert_tools import *")
 
 def verify_command():
     """Verify migrated test files work correctly."""
