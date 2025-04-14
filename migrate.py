@@ -6,6 +6,9 @@ This script clones a Git repository and automatically migrates nose tests to pyt
 
 Usage:
   ./migrate.py REPO_URL [TARGET_DIR]
+
+Copyright (c) 2025 eric-downes
+Licensed under the MIT License (see LICENSE file for details)
 """
 
 import os
@@ -93,18 +96,21 @@ def scan_repository(repo_path: str) -> List[str]:
     nose_files = find_nose_test_files(repo_path)
     return nose_files
 
-def migrate_tests(repo_path: str, nose_files: List[str]) -> Tuple[List[str], List[Tuple[str, str]]]:
+def migrate_tests(repo_path: str, nose_files: List[str], use_nose2pytest: bool = True) -> Tuple[List[str], List[Tuple[str, str]]]:
     """
     Migrate nose tests to pytest.
     
     Args:
         repo_path: Path to the repository
         nose_files: List of nose test files
+        use_nose2pytest: If True, also apply nose2pytest transformations for assert statements
         
     Returns:
         Tuple of (successful_migrations, failed_migrations)
     """
     print(f"Migrating {len(nose_files)} nose tests to pytest...")
+    if use_nose2pytest:
+        print("Using nose2pytest for assertion transformations")
     
     successful_migrations = []
     failed_migrations = []
@@ -114,7 +120,7 @@ def migrate_tests(repo_path: str, nose_files: List[str]) -> Tuple[List[str], Lis
         print(f"\nMigrating {rel_path}...")
         
         # Apply transformations
-        success, summary = migrate_file(file_path)
+        success, summary = migrate_file(file_path, use_nose2pytest=use_nose2pytest)
         
         if not success:
             print("  No transformations applied.")
@@ -250,6 +256,16 @@ def commit_changes(repo_path: str, successful_migrations: List[str]) -> bool:
         print(f"Error committing changes: {e}")
         return False
 
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='Migrate nose tests to pytest')
+    parser.add_argument('repo_url', help='Git repository URL to clone')
+    parser.add_argument('target_dir', nargs='?', default=None, 
+                        help='Target directory for the repository (optional)')
+    parser.add_argument('--no-nose2pytest', action='store_true',
+                        help='Disable using nose2pytest for assertion transformations')
+    return parser.parse_args()
+
 def main():
     args = parse_args()
     
@@ -270,7 +286,23 @@ def main():
     migration_data = create_default_migration_data()
     
     # Migrate tests
-    successful, failed = migrate_tests(repo_path, nose_files)
+    use_nose2pytest = not args.no_nose2pytest
+    successful, failed = migrate_tests(repo_path, nose_files, use_nose2pytest=use_nose2pytest)
+    
+    # Copy assert_tools.py to repository for unsupported assert functions
+    assert_tools_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src', 'assert_tools.py')
+    assert_tools_dest = os.path.join(repo_path, 'pytest_assert_tools.py')
+    
+    if use_nose2pytest and successful:
+        print(f"\nCopying assert_tools.py to {assert_tools_dest}")
+        shutil.copy2(assert_tools_src, assert_tools_dest)
+        
+        # Add the file to Git if using Git
+        try:
+            repo = git.Repo(repo_path)
+            repo.git.add(assert_tools_dest)
+        except:
+            pass
     
     # Generate report
     report_path = generate_report(repo_path, successful, failed)

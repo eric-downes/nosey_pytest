@@ -29,26 +29,44 @@ def get_config():
     if not os.path.exists(config_path):
         # Create default config with common transformations
         config = DEFAULT_CONFIG.copy()
-        config["transformation_patterns"] = COMMON_TRANSFORMATIONS
         
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=2)
-        return config
-    
-    with open(config_path, 'r', encoding='utf-8') as f:
-        config = json.load(f)
-        
-        # Check if we need to update with new transformations
-        existing_ids = {t["id"] for t in config.get("transformation_patterns", [])}
+        # Add all transformations except those with lambdas
+        # (which will be added programmatically after loading)
+        serializable_transformations = []
         for transform in COMMON_TRANSFORMATIONS:
-            if transform["id"] not in existing_ids:
-                config.setdefault("transformation_patterns", []).append(transform)
-                
-        # Save updated config
+            if not callable(transform.get("replacement")):
+                serializable_transformations.append(transform)
+        
+        config["transformation_patterns"] = serializable_transformations
+        
         with open(config_path, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2)
+    else:
+        # Load existing config
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
             
-        return config
+            # Check if we need to update with new transformations
+            existing_ids = {t["id"] for t in config.get("transformation_patterns", [])}
+            for transform in COMMON_TRANSFORMATIONS:
+                if transform["id"] not in existing_ids and not callable(transform.get("replacement")):
+                    config.setdefault("transformation_patterns", []).append(transform)
+                    
+            # Save updated config
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, indent=2)
+    
+    # Always add transformations from code if they have non-serializable parts like functions
+    # or if they are marked as template or special_case
+    existing_ids = {t["id"] for t in config.get("transformation_patterns", [])}
+    for transform in COMMON_TRANSFORMATIONS:
+        if (transform["id"] not in existing_ids or 
+            transform.get("template") or 
+            transform.get("special_case") or
+            callable(transform.get("replacement"))):
+            config.setdefault("transformation_patterns", []).append(transform)
+            
+    return config
 
 # Configuration
 DEFAULT_CONFIG = {
@@ -67,6 +85,14 @@ DEFAULT_CONFIG = {
 # Common transformation patterns
 COMMON_TRANSFORMATIONS = [
     # Import replacements
+    {
+        "id": "nose_tools_assertions_import",
+        "pattern": r'from\s+nose\.tools\s+import\s+assert_.*?(?:\n|$)',
+        "replacement": '',
+        "description": 'Remove nose.tools assertion imports',
+        "priority": 5,
+        "enabled": True
+    },
     {
         "id": "nose_raises_import",
         "pattern": r'from\s+nose\.tools\s+import\s+raises',
@@ -96,7 +122,15 @@ COMMON_TRANSFORMATIONS = [
         "pattern": r'from\s+nose\.tools\s+import\s+',
         "replacement": 'import pytest # Replacing: from nose.tools import ',
         "description": 'Replace nose.tools imports with pytest',
-        "priority": 10,
+        "priority": 10, 
+        "enabled": True
+    },
+    {
+        "id": "nose_tools_assert_equal_import",
+        "pattern": r'from\s+nose\.tools\s+import\s+(.*\b)assert_equal(\b.*)',
+        "replacement": r'import pytest # Replacing: from nose.tools import \1assert_equal\2',
+        "description": 'Replace nose.tools import assert_equal with pytest',
+        "priority": 5,
         "enabled": True
     },
     # Decorator replacements
@@ -106,7 +140,7 @@ COMMON_TRANSFORMATIONS = [
         "replacement": r'@pytest.mark.xfail(raises=\1)',
         "description": 'Convert @raises to @pytest.mark.xfail',
         "priority": 20,
-        "enabled": True
+        "enabled": False  # Disabled since we have a more specific version now
     },
     {
         "id": "expected_failure_function",
@@ -246,6 +280,124 @@ COMMON_TRANSFORMATIONS = [
         "priority": 30,
         "enabled": True
     },
+    
+    # nose.tools standalone assertion functions - using template strings instead of lambdas for JSON compatibility
+    {
+        "id": "nose_tools_assert_equal",
+        "pattern": r'assert_equal\(([^,]+),\s*([^,)]+)(?:,\s*([^)]+))?\)',
+        "replacement": r'assert \1 == \2\3',
+        "description": 'Convert assert_equal() to assert',
+        "priority": 25,
+        "enabled": True,
+        "template": True
+    },
+    {
+        "id": "nose_tools_assert_not_equal",
+        "pattern": r'assert_not_equal\(([^,]+),\s*([^,)]+)(?:,\s*([^)]+))?\)',
+        "replacement": r'assert \1 != \2\3',
+        "description": 'Convert assert_not_equal() to assert',
+        "priority": 25,
+        "enabled": True,
+        "template": True
+    },
+    {
+        "id": "nose_tools_assert_true",
+        "pattern": r'assert_true\(([^,)]+)(?:,\s*([^)]+))?\)',
+        "replacement": r'assert \1\2',
+        "description": 'Convert assert_true() to assert',
+        "priority": 25,
+        "enabled": True,
+        "template": True
+    },
+    {
+        "id": "nose_tools_assert_false",
+        "pattern": r'assert_false\(([^,)]+)(?:,\s*([^)]+))?\)',
+        "replacement": r'assert not \1\2',
+        "description": 'Convert assert_false() to assert',
+        "priority": 25,
+        "enabled": True,
+        "template": True
+    },
+    {
+        "id": "nose_tools_assert_in",
+        "pattern": r'assert_in\(([^,]+),\s*([^,)]+)(?:,\s*([^)]+))?\)',
+        "replacement": r'assert \1 in \2\3',
+        "description": 'Convert assert_in() to assert',
+        "priority": 25,
+        "enabled": True,
+        "template": True
+    },
+    {
+        "id": "nose_tools_assert_not_in",
+        "pattern": r'assert_not_in\(([^,]+),\s*([^,)]+)(?:,\s*([^)]+))?\)',
+        "replacement": r'assert \1 not in \2\3',
+        "description": 'Convert assert_not_in() to assert',
+        "priority": 25,
+        "enabled": True,
+        "template": True
+    },
+    {
+        "id": "nose_tools_assert_is",
+        "pattern": r'assert_is\(([^,]+),\s*([^,)]+)(?:,\s*([^)]+))?\)',
+        "replacement": r'assert \1 is \2\3',
+        "description": 'Convert assert_is() to assert',
+        "priority": 25,
+        "enabled": True,
+        "template": True
+    },
+    {
+        "id": "nose_tools_assert_is_not",
+        "pattern": r'assert_is_not\(([^,]+),\s*([^,)]+)(?:,\s*([^)]+))?\)',
+        "replacement": r'assert \1 is not \2\3',
+        "description": 'Convert assert_is_not() to assert',
+        "priority": 25,
+        "enabled": True,
+        "template": True
+    },
+    {
+        "id": "nose_tools_assert_is_none",
+        "pattern": r'assert_is_none\(([^,)]+)(?:,\s*([^)]+))?\)',
+        "replacement": r'assert \1 is None\2',
+        "description": 'Convert assert_is_none() to assert',
+        "priority": 25,
+        "enabled": True,
+        "template": True
+    },
+    {
+        "id": "nose_tools_assert_is_not_none",
+        "pattern": r'assert_is_not_none\(([^,)]+)(?:,\s*([^)]+))?\)',
+        "replacement": r'assert \1 is not None\2',
+        "description": 'Convert assert_is_not_none() to assert',
+        "priority": 25,
+        "enabled": True,
+        "template": True
+    },
+    {
+        "id": "nose_tools_assert_almost_equal",
+        "pattern": r'assert_almost_equal\(([^,]+),\s*([^,)]+)(?:,\s*([^,)]+))?(?:,\s*([^)]+))?\)',
+        "replacement": r'assert \1 == pytest.approx(\2)',
+        "description": 'Convert assert_almost_equal() to assert with pytest.approx()',
+        "priority": 25,
+        "enabled": True,
+        "special_case": "almost_equal"
+    },
+    {
+        "id": "nose_tools_assert_raises",
+        "pattern": r'with\s+assert_raises\(([^)]+)\):',
+        "replacement": r'with pytest.raises(\1):',
+        "description": 'Convert assert_raises() context manager to pytest.raises()',
+        "priority": 25,
+        "enabled": True
+    },
+    {
+        "id": "nose_tools_assert_raises_decorator",
+        "pattern": r'@raises\(([^)]+)\)',
+        "replacement": r'@pytest.mark.xfail(raises=\1)',
+        "description": 'Convert @raises() decorator to pytest.mark.xfail',
+        "priority": 25,
+        "enabled": True
+    },
+    
     # Class inheritance
     {
         "id": "unittest_testcase",
@@ -320,8 +472,26 @@ os.makedirs(BACKUP_DIR, exist_ok=True)
 def save_config(config):
     """Save updated configuration."""
     config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.pytest_automigrate_config.json')
+    
+    # Create a copy of the config that we can modify
+    serializable_config = config.copy()
+    
+    # Filter out transformations with non-serializable parts
+    serializable_transformations = []
+    for transform in config.get("transformation_patterns", []):
+        # Skip transformations with callable replacements
+        if callable(transform.get("replacement")):
+            continue
+        # Create a copy of the transformation to avoid modifying the original
+        transform_copy = transform.copy()
+        serializable_transformations.append(transform_copy)
+    
+    # Replace the transformations list with our filtered version
+    serializable_config["transformation_patterns"] = serializable_transformations
+    
+    # Save the serializable config
     with open(config_path, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=2)
+        json.dump(serializable_config, f, indent=2)
 
 def update_config():
     """Interactive configuration update."""
@@ -540,7 +710,64 @@ def migrate_file(file_path: str, dry_run: bool = False, use_nose2pytest: bool = 
             
             # Apply transformation
             if matches_before > 0:
-                transformed_content = re.sub(pattern, replacement, transformed_content, flags=flags)
+                # Handle different types of replacements
+                if callable(replacement):
+                    # Function replacements (legacy support)
+                    transformed_content = re.sub(pattern, replacement, transformed_content, flags=flags)
+                elif transform.get("template", False):
+                    # Template-based replacements for msg parameter handling
+                    def template_replace(match):
+                        result = replacement
+                        
+                        # Handle message parameter in group 3 (if present and not empty)
+                        if result.endswith(r'\3') and match.lastindex >= 3 and match.group(3):
+                            result = result[:-2] + ", " + match.group(3)
+                        elif result.endswith(r'\2') and match.lastindex >= 2 and match.group(2):
+                            result = result[:-2] + ", " + match.group(2)
+                        elif result.endswith(r'\3') and (match.lastindex < 3 or not match.group(3)):
+                            result = result[:-2]  # Remove the \3 if no match
+                        elif result.endswith(r'\2') and (match.lastindex < 2 or not match.group(2)):
+                            result = result[:-2]  # Remove the \2 if no match
+                            
+                        # Replace other numbered groups
+                        for i in range(1, match.lastindex + 1):
+                            if match.group(i) and fr'\{i}' in result:
+                                result = result.replace(fr'\{i}', match.group(i))
+                                
+                        return result
+                        
+                    transformed_content = re.sub(pattern, template_replace, transformed_content, flags=flags)
+                elif transform.get("special_case") == "almost_equal":
+                    # Special handling for assert_almost_equal which is more complex
+                    def handle_almost_equal(match):
+                        # First two params are always the values to compare
+                        result = f"assert {match.group(1)} == pytest.approx({match.group(2)}"
+                        
+                        # Check if we have a third parameter (places or delta)
+                        if match.lastindex >= 3 and match.group(3):
+                            # If it's a numeric value, it's probably places or delta
+                            if match.group(3).strip().isdigit():
+                                result += f", abs={match.group(3).strip()}"
+                            # Otherwise it might be a message
+                            else:
+                                result += ")"  # Close the approx call
+                                result += f", {match.group(3)}"  # Add the message
+                                return result
+                        
+                        # Close the approx parenthesis if still open
+                        if not result.endswith(")"):
+                            result += ")"
+                            
+                        # Check if we have a fourth parameter (message)
+                        if match.lastindex >= 4 and match.group(4):
+                            result += f", {match.group(4)}"
+                            
+                        return result
+                        
+                    transformed_content = re.sub(pattern, handle_almost_equal, transformed_content, flags=flags)
+                else:
+                    # Standard string replacements
+                    transformed_content = re.sub(pattern, replacement, transformed_content, flags=flags)
                 
                 # Count matches after transformation to verify
                 matches_after = len(re.findall(pattern, transformed_content, flags))
@@ -558,9 +785,34 @@ def migrate_file(file_path: str, dry_run: bool = False, use_nose2pytest: bool = 
                 'error': True
             })
     
-    # Add pytest import if needed and not already present
-    if not re.search(r'import\s+pytest', transformed_content) and len(modifications) > 0:
-        transformed_content = "import pytest\n" + transformed_content
+    # Fix and consolidate pytest imports
+    if len(modifications) > 0:
+        # First remove any duplicate pytest imports with comments
+        transformed_content = re.sub(r'import\s+pytest\s+#.*?\n', '', transformed_content)
+        
+        # Then deduplicate plain pytest imports
+        pytest_imports = re.findall(r'import\s+pytest(?!\s*#)', transformed_content)
+        if len(pytest_imports) > 0:
+            # Remove all pytest imports
+            transformed_content = re.sub(r'import\s+pytest(?!\s*#)', '', transformed_content)
+            modifications.append({
+                'id': 'deduplicate_pytest_import',
+                'description': 'Deduplicated pytest imports',
+                'matches_replaced': len(pytest_imports)
+            })
+        
+        # Remove extra blank lines (more than 2 consecutive)
+        transformed_content = re.sub(r'\n{3,}', '\n\n', transformed_content)
+        
+        # Try to add the pytest import after a docstring if one exists,
+        # or at the beginning of the file otherwise
+        docstring_match = re.search(r'""".*?"""\s*\n', transformed_content, re.DOTALL)
+        if docstring_match:
+            end = docstring_match.end()
+            transformed_content = transformed_content[:end] + "import pytest\n\n" + transformed_content[end:]
+        else:
+            transformed_content = "import pytest\n\n" + transformed_content
+            
         modifications.append({
             'id': 'add_pytest_import',
             'description': 'Added pytest import',
@@ -737,7 +989,7 @@ def scan_command(directory: Optional[str] = None):
             for transform in analysis['applicable_transformations']:
                 print(f"   - {transform['description']} ({transform['match_count']} matches)")
 
-def migrate_command(path: Optional[str] = None, use_nose2pytest: bool = True):
+def migrate_command(path: Optional[str] = None, use_nose2pytest: bool = True, skip_verification: bool = False):
     """Run automated migration on nose test files."""
     # If a path is specified, handle it
     if path:
@@ -771,6 +1023,8 @@ def migrate_command(path: Optional[str] = None, use_nose2pytest: bool = True):
     print(f"Migrating {len(nose_files)} files from nose to pytest...")
     if use_nose2pytest:
         print("Using nose2pytest for assertion transformations")
+    if skip_verification:
+        print("Skipping verification step")
     
     successful_migrations = []
     failed_migrations = []
@@ -789,6 +1043,12 @@ def migrate_command(path: Optional[str] = None, use_nose2pytest: bool = True):
         
         print("  Applied transformations:")
         print(summary)
+        
+        # Skip verification if requested
+        if skip_verification:
+            print("  Skipping verification as requested.")
+            successful_migrations.append(rel_path)
+            continue
         
         # Verify the migrated file works
         print("  Verifying migration...")
